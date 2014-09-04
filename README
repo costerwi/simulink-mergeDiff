@@ -1,0 +1,25 @@
+This is a simple tool I use to help merge contributions from other users into 
+one Simulink model.  I am unaware of other non-commercial tools to accomplish 
+this task.
+
+UNIQUE = mergeDiff(SRCMODEL, DSTMODEL) compares block names and dialog 
+parameters from two similar models. In the process, DSTMODEL will
+be updated with parameter values and missing blocks from SRCMODEL.
+
+Blocks are color coded upon completion:
+ White - Block is unique to DSTMODEL or unchanged from SRCMODEL
+ Green - Block was missing from DSTMODEL
+ Orange - Block's parameters were updated
+ Yellow - Subsystem contains modifications
+
+This function does not examine connecting lines.  The user should review
+and connect these colored blocks manually to complete the merge.
+
+Returns names of blocks unique to DSTMODEL.
+
+EXAMPLE
+% Merge contributions from another Simulink user's model
+load_system('hismodel');
+open_system('mymodel');
+mergeDiff('hismodel', 'mymodel');
+
