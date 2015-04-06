@@ -22,7 +22,7 @@ function [unique] = mergeDiff(oldModel, newModel, merge)
 %
 % EXAMPLE
 % % List differences between two Simulink models:
-% load_system('oldmodel');
+% open_system('oldmodel');
 % open_system('newmodel');
 % mergeDiff('oldmodel', 'newmodel');
 %
@@ -45,42 +45,59 @@ function [unique] = mergeDiff(oldModel, newModel, merge)
         if strncmp(blockName, ignoreBlock, length(ignoreBlock))
             continue;
         end
+        makeCopy = false;
         if ~any(strcmp(blocks{i}, oldBlocks))
-            % block is new
+            % block is only in newModel
             fprintf(1, '++ %s ++\n', blockName);
-            if merge
-                % Insert the new block
-                oldBlocks = copyBlock(newBlocks{i}, blocks{i});
-            else
-                % ignore any childen of blockName
-                ignoreBlock = blockName;
-            end
+            makeCopy = true;
         else
+            response = 10;
             % block name is common to both models
             newParams = get_param(newBlocks{i}, 'DialogParameters');
             oldParams = get_param(blocks{i}, 'DialogParameters');
-            if ~isequal(newParams, oldParams)
-                % Parameter names are different for block of same name
-                % TODO: Report the changed parameter names
-                fprintf(1, '!! %s !!\n', blockName);
-                if merge
-                    % Insert the new block
-                    oldBlocks = copyBlock(newBlocks{i}, blocks{i});
+
+            if isstruct(newParams)
+                newFields = fieldnames(newParams);
+            else
+                newFields = {};
+            end
+            if isstruct(oldParams)
+                oldFields = fieldnames(oldParams);
+            else
+                oldFields = {};
+            end
+
+            % report deleted params
+            d = setdiff(oldFields, newFields);
+            if ~isempty(d)
+                fprintf(1, '@@ %s @@\n', blockName);
+                response = 1;
+                for j = 1:length(d)
+                    fprintf(1, '-%s = %s\n', d{j}, num2str(get_param(blocks{i}, d{j})));
                 end
-            elseif ~isempty(newParams)
-                % same parameter names; check if values are different
-                flds = fields(newParams);
-                response = 10;
-                for j = 1:length(flds)
-                    srcValue = get_param(newBlocks{i}, flds{j});
-                    dstValue = get_param(blocks{i}, flds{j});
-                    if ~isequal(srcValue, dstValue) && ~any(strcmp('read-only', ...
-                            oldParams.(flds{j}).Attributes))
+                makeCopy = true;
+            end
+
+            % report changed params
+            for j = 1:length(newFields)
+                newValue = get_param(newBlocks{i}, newFields{j});
+                if ~isfield(oldParams, newFields{j})
+                    % old model is missing this param
+                    if response > 4 % show block name if first difference
+                        fprintf(1,'@@ %s @@\n', blockName);
+                    end
+                    fprintf(1, '+%s = %s\n', newFields{j}, num2str(newValue));
+                    makeCopy = true; % copy whole block
+                else
+                    % param exists in both models
+                    oldValue = get_param(blocks{i}, newFields{j});
+                    if ~isequal(newValue, oldValue) && ~any(strcmp('read-only', ...
+                            oldParams.(newFields{j}).Attributes))
                         if response > 4 % show block name if first difference
                             fprintf(1,'@@ %s @@\n', blockName);
                         end
-                        fprintf(1, '-%s = %s\n', flds{j}, num2str(dstValue));
-                        fprintf(1, '+%s = %s\n', flds{j}, num2str(srcValue));
+                        fprintf(1, '-%s = %s\n', newFields{j}, num2str(oldValue));
+                        fprintf(1, '+%s = %s\n', newFields{j}, num2str(newValue));
                         if ~merge
                             response = 3; % equivalent to 'n'
                         elseif response > 1
@@ -92,12 +109,16 @@ function [unique] = mergeDiff(oldModel, newModel, merge)
                         if 4 == response
                             break
                         elseif response <= 2
-                            set_param(blocks{i}, flds{j}, srcValue);
+                            set_param(blocks{i}, newFields{j}, newValue);
                             updateColor(blocks{i}, 'orange');
                         end
                     end
                 end
             end
+        end
+        if merge && makeCopy
+            copyBlock(newBlocks{i}, blocks{i});
+            ignoreBlock = blockName; % ignore any childen of blockName
         end
     end
 
@@ -105,6 +126,10 @@ function [unique] = mergeDiff(oldModel, newModel, merge)
     unique = setdiff(oldBlocks, blocks);
     for i = 1:length(unique)
         blockName = regexprep(unique{i}(length(oldModel)+1:end), '[^\w/]', ' ');
+        if strncmp(blockName, ignoreBlock, length(ignoreBlock))
+            continue;
+        end
+        ignoreBlock = blockName; % ignore children
         fprintf(1, '-- %s --\n', blockName);
         if merge
             updateColor(unique{i}, 'red');
@@ -112,13 +137,10 @@ function [unique] = mergeDiff(oldModel, newModel, merge)
     end
 end
 
-function [dstBlocks] = copyBlock(srcBlock, dstBlock)
-%Copies srcBlock to dstBlock and returns new list of blocks in destination model.
+function copyBlock(srcBlock, dstBlock)
+%Copies srcBlock to dstBlock.
     block = add_block(srcBlock, dstBlock, 'MakeNameUnique', 'on');
     updateColor(block, 'green');
-    % Update dstBlocks to include any children of block
-    dstBlocks = find_system(bdroot(dstBlock), 'LookUnderMasks', 'all', ...
-        'type', 'block');
 end
 
 function updateColor(block, color)
